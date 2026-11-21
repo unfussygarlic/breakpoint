@@ -33,7 +33,8 @@ class RunConfig:
     spec: STLSpec = field(default_factory=STLSpec)
     apf: APFConfig = field(default_factory=APFConfig)
     max_steps: int = 400
-    store_trajectory: bool = True   # keep full traj in the record (for replay/plots)
+    store_trajectory: bool = True
+    store_transitions: bool = False  # keep (s, a, s') tuples (for world-model training)
 
 
 @dataclass
@@ -54,9 +55,12 @@ class RunRecord:
     rho_spec: float
     failed: bool
     trajectory: list | None = None
+    transitions: list | None = None   # in-memory (s,a,s') arrays; not JSON-serialized
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=2)
+        d = asdict(self)
+        d.pop("transitions", None)   # numpy arrays; not for JSON
+        return json.dumps(d, indent=2)
 
     @staticmethod
     def from_json(s: str) -> "RunRecord":
@@ -97,12 +101,19 @@ def run(u, cfg: RunConfig | None = None) -> RunRecord:
     s = env.reset()
     traj = [s[:2].copy()]
     reached = False
+    trans = []  # (s, a_applied, s') tuples for world-model training
+    fmax = env_cfg.f_max
     for _ in range(cfg.max_steps):
         obs = s.copy()
         if sc.sensor_noise > 0.0:
             obs[:2] = obs[:2] + noise_rng.normal(0.0, sc.sensor_noise, size=2)
         u_ctrl = ctrl(obs)
-        s = env.step(u_ctrl)            # TRUE dynamics, noise-free
+        nrm = np.linalg.norm(u_ctrl)
+        a_applied = u_ctrl * (fmax / nrm) if nrm > fmax else u_ctrl  # what the env applies
+        s_prev = s.copy()
+        s = env.step(a_applied)         # TRUE dynamics, noise-free
+        if cfg.store_transitions:
+            trans.append((s_prev, np.asarray(a_applied, dtype=float), s.copy()))
         traj.append(s[:2].copy())
         if env.dist_to_goal(s[:2]) <= cfg.spec.eps:
             reached = True
@@ -134,6 +145,7 @@ def run(u, cfg: RunConfig | None = None) -> RunRecord:
         rho_spec=res.rho_spec,
         failed=res.failed,
         trajectory=[[float(x), float(y)] for x, y in traj] if cfg.store_trajectory else None,
+        transitions=trans if cfg.store_transitions else None,
     )
 
 
