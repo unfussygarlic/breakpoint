@@ -23,9 +23,9 @@ import numpy as np
 @dataclass
 class APFConfig:
     k_att: float = 3.0
-    k_rep: float = 0.08
+    k_rep: float = 0.02          # weakened (Stage E, Setup 2): momentum can breach obstacles
     influence: float = 0.22      # d0: repulsion acts only within this surface distance
-    inside_push: float = 50.0    # strong radial push if the robot is inside an obstacle (ghost)
+    inside_push: float = 4.0     # weak ejection -> collisions are a rare-but-present critical failure
 
 
 class PotentialFieldController:
